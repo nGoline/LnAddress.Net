@@ -136,6 +136,29 @@ docker run -d \
   ngoline/lnaddress.net:latest
 ```
 
+## Supported LNURL Specs
+
+- [LUD-06](https://github.com/lnurl/luds/blob/luds/06.md): `payRequest` base spec.
+- [LUD-12](https://github.com/lnurl/luds/blob/luds/12.md): comments in `payRequest`, enabled by
+  `INVOICE__MAXCOMMENTALLOWED`.
+- [LUD-16](https://github.com/lnurl/luds/blob/luds/16.md): Lightning Address, `username@your.domain`.
+- [LUD-21](https://github.com/lnurl/luds/blob/luds/21.md): `verify` base spec. The callback response carries a
+  `verify` URL (`https://your.domain/lnurl/verify/<payment_hash>`) that anyone holding the invoice can poll to learn
+  whether it was settled. Once paid, the response includes the preimage:
+
+  ```json
+  {"status": "OK", "settled": true, "preimage": "<hex>", "pr": "lnbc..."}
+  ```
+
+  Unknown payment hashes return `{"status": "ERROR", "reason": "Not found"}`. The endpoint needs no authentication.
+  It looks up the hash on the backend node, so it answers for **any** invoice on that node, not only the ones
+  LnAddress created. For invoices LnAddress issued, it only reveals data the payer already holds.
+
+  > **Use a dedicated node.** If other apps (a shop, a wallet, ...) create invoices on the same node, anyone who
+  > learns one of their payment hashes can read the full bolt11 (amount and description), and once it is paid, the
+  > preimage, which serves as proof of payment. Run LnAddress against a node used only for it, or don't expose
+  > `/lnurl/verify` publicly.
+
 ## Default Settings
 
 - **MinSendable**: 1,000 millisatoshis (1 satoshi)
