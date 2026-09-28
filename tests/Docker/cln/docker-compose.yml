@@ -1,4 +1,5 @@
-# Regtest bitcoind + Core Lightning node with the cln-grpc plugin enabled.
+# Regtest bitcoind + Core Lightning node with the cln-grpc plugin enabled, plus a second
+# Core Lightning node that pays invoices over a direct channel.
 # Used by the ClnGrpcIntegrationTest fixture.
 services:
   bitcoind:
@@ -36,8 +37,26 @@ services:
       - --bitcoin-rpcuser=lnaddress
       - --bitcoin-rpcpassword=lnaddress
       - --alias=lnaddress-cln
+      # The payer node connects here (regtest would otherwise default to 19846)
+      - --bind-addr=0.0.0.0:9735
       - --grpc-host=0.0.0.0
       - --grpc-port=9736
       - --log-level=info
     ports:
       - "127.0.0.1:19736:9736"
+
+  cln-payer:
+    image: elementsproject/lightningd:v26.06.8
+    container_name: lnaddress-cln-payer
+    depends_on:
+      bitcoind:
+        condition: service_healthy
+    environment:
+      - LIGHTNINGD_NETWORK=regtest
+    command:
+      - --bitcoin-rpcconnect=bitcoind
+      - --bitcoin-rpcport=18443
+      - --bitcoin-rpcuser=lnaddress
+      - --bitcoin-rpcpassword=lnaddress
+      - --alias=lnaddress-cln-payer
+      - --log-level=info
