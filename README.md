@@ -37,7 +37,7 @@ This is the default backend (`LIGHTNING__BACKEND=lnd`). To enable Lightning paym
 LnAddress.Net to your LND instance. You will need:
 
 - The **TLS certificate** (`tls.cert`)
-- The **admin.macaroon** in base64 format
+- A **macaroon** baked with the permissions the service needs, in base64 format
 - The **LND RPC server endpoint**
 
 **Steps to Obtain LND Credentials**:
@@ -52,13 +52,24 @@ LnAddress.Net to your LND instance. You will need:
 
    Copy only the certificate portion without the header and footer lines.
 
-2. **Invoice Macaroon**:
+2. **Macaroon**:
 
-   Convert the `invoice.macaroon` to a single-line base64 string:
+   Bake a macaroon that grants only what the service needs: `invoices:write` to create invoices,
+   `invoices:read` to look them up for the verify endpoint, and `info:read` for `/health`:
 
    ```bash
-   base64 /.lnd/data/chain/bitcoin/mainnet/invoice.macaroon | tr -d '\n'
+   lncli bakemacaroon --save_to=lnaddress.macaroon invoices:read invoices:write info:read
    ```
+
+   Then convert it to a single-line base64 string:
+
+   ```bash
+   base64 lnaddress.macaroon | tr -d '\n'
+   ```
+
+   > Don't use the stock `invoice.macaroon`: it lacks `info:read`, so invoices work but `/health` fails and the
+   > Docker healthcheck marks the container unhealthy. Avoid `admin.macaroon` too, since it grants full control of
+   > the node, including spending funds.
 
 3. **RPC Server URL**:
 
@@ -182,7 +193,7 @@ or, if running standalone:
 docker run -d \
   -p 80:80 \
   -e LND__CERT="<base64_tls_cert>" \
-  -e LND__MACAROON="<base64_admin_macaroon>" \
+  -e LND__MACAROON="<base64_macaroon>" \
   -e LND__RPCADDRESS="https://<lnd-ip>:10009" \
   ngoline/lnaddress.net:latest
 ```
