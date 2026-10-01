@@ -1,4 +1,5 @@
 using System.Security.Cryptography.X509Certificates;
+using Google.Protobuf;
 using Grpc.Core;
 using Grpc.Net.Client;
 
@@ -6,6 +7,7 @@ namespace LnAddress.Net.Services;
 
 using Lnrpc;
 using Interfaces;
+using Models.Lightning;
 
 public class LndService : ILightningService
 {
@@ -46,7 +48,7 @@ public class LndService : ILightningService
         _rpcClient = new Lightning.LightningClient(channel);
     }
 
-    public async Task<string> FetchInvoiceAsync(long valueMillisats, string username, string? comment)
+    public async Task<CreatedInvoice> FetchInvoiceAsync(long valueMillisats, string username, string? comment)
     {
         try
         {
@@ -57,11 +59,34 @@ public class LndService : ILightningService
             };
 
             var response = await _rpcClient.AddInvoiceAsync(invoice);
-            return response.PaymentRequest;
+            return new CreatedInvoice(response.PaymentRequest, Convert.ToHexStringLower(response.RHash.Span));
         }
         catch (Exception e)
         {
             const string errorMessage = "Error fetching invoice from server";
+            _logger.LogError(e, errorMessage);
+            throw new Exception(errorMessage);
+        }
+    }
+
+    public async Task<InvoiceStatus?> LookupInvoiceAsync(string paymentHash)
+    {
+        try
+        {
+            var request = new PaymentHash { RHash = ByteString.CopyFrom(Convert.FromHexString(paymentHash)) };
+            var invoice = await _rpcClient.LookupInvoiceAsync(request);
+
+            var settled = invoice.State == Invoice.Types.InvoiceState.Settled;
+            var preimage = settled ? Convert.ToHexStringLower(invoice.RPreimage.Span) : null;
+            return new InvoiceStatus(invoice.PaymentRequest, settled, preimage);
+        }
+        catch (RpcException e) when (e.StatusCode == StatusCode.NotFound)
+        {
+            return null;
+        }
+        catch (Exception e)
+        {
+            const string errorMessage = "Error looking up invoice on server";
             _logger.LogError(e, errorMessage);
             throw new Exception(errorMessage);
         }

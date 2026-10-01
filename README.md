@@ -37,7 +37,7 @@ This is the default backend (`LIGHTNING__BACKEND=lnd`). To enable Lightning paym
 LnAddress.Net to your LND instance. You will need:
 
 - The **TLS certificate** (`tls.cert`)
-- The **admin.macaroon** in base64 format
+- A **macaroon** baked with the permissions the service needs, in base64 format
 - The **LND RPC server endpoint**
 
 **Steps to Obtain LND Credentials**:
@@ -52,13 +52,24 @@ LnAddress.Net to your LND instance. You will need:
 
    Copy only the certificate portion without the header and footer lines.
 
-2. **Invoice Macaroon**:
+2. **Macaroon**:
 
-   Convert the `invoice.macaroon` to a single-line base64 string:
+   Bake a macaroon that grants only what the service needs: `invoices:write` to create invoices,
+   `invoices:read` to look them up for the verify endpoint, and `info:read` for `/health`:
 
    ```bash
-   base64 /.lnd/data/chain/bitcoin/mainnet/invoice.macaroon | tr -d '\n'
+   lncli bakemacaroon --save_to=lnaddress.macaroon invoices:read invoices:write info:read
    ```
+
+   Then convert it to a single-line base64 string:
+
+   ```bash
+   base64 lnaddress.macaroon | tr -d '\n'
+   ```
+
+   > Don't use the stock `invoice.macaroon`: it lacks `info:read`, so invoices work but `/health` fails and the
+   > Docker healthcheck marks the container unhealthy. Avoid `admin.macaroon` too, since it grants full control of
+   > the node, including spending funds.
 
 3. **RPC Server URL**:
 
@@ -136,6 +147,29 @@ docker run -d \
   ngoline/lnaddress.net:latest
 ```
 
+## Supported LNURL Specs
+
+- [LUD-06](https://github.com/lnurl/luds/blob/luds/06.md): `payRequest` base spec.
+- [LUD-12](https://github.com/lnurl/luds/blob/luds/12.md): comments in `payRequest`, enabled by
+  `INVOICE__MAXCOMMENTALLOWED`.
+- [LUD-16](https://github.com/lnurl/luds/blob/luds/16.md): Lightning Address, `username@your.domain`.
+- [LUD-21](https://github.com/lnurl/luds/blob/luds/21.md): `verify` base spec. The callback response carries a
+  `verify` URL (`https://your.domain/lnurl/verify/<payment_hash>`) that anyone holding the invoice can poll to learn
+  whether it was settled. Once paid, the response includes the preimage:
+
+  ```json
+  {"status": "OK", "settled": true, "preimage": "<hex>", "pr": "lnbc..."}
+  ```
+
+  Unknown payment hashes return `{"status": "ERROR", "reason": "Not found"}`. The endpoint needs no authentication.
+  It looks up the hash on the backend node, so it answers for **any** invoice on that node, not only the ones
+  LnAddress created. For invoices LnAddress issued, it only reveals data the payer already holds.
+
+  > **Use a dedicated node.** If other apps (a shop, a wallet, ...) create invoices on the same node, anyone who
+  > learns one of their payment hashes can read the full bolt11 (amount and description), and once it is paid, the
+  > preimage, which serves as proof of payment. Run LnAddress against a node used only for it, or don't expose
+  > `/lnurl/verify` publicly.
+
 ## Default Settings
 
 - **MinSendable**: 1,000 millisatoshis (1 satoshi)
@@ -159,7 +193,7 @@ or, if running standalone:
 docker run -d \
   -p 80:80 \
   -e LND__CERT="<base64_tls_cert>" \
-  -e LND__MACAROON="<base64_admin_macaroon>" \
+  -e LND__MACAROON="<base64_macaroon>" \
   -e LND__RPCADDRESS="https://<lnd-ip>:10009" \
   ngoline/lnaddress.net:latest
 ```

@@ -7,3 +7,7 @@ Accept: application/json
 GET {{lnaddress_HostAddress}}/lnurl/callback/{{$random.uuid}}?amount=10000&comment=testing
 Accept: application/json
 
+###
+# LUD-21: replace the hash with the one from the callback response's "verify" URL
+GET {{lnaddress_HostAddress}}/lnurl/verify/0000000000000000000000000000000000000000000000000000000000000000
+Accept: application/json

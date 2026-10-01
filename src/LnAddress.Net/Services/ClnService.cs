@@ -1,11 +1,13 @@
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
+using Google.Protobuf;
 using Grpc.Net.Client;
 
 namespace LnAddress.Net.Services;
 
 using Cln;
 using Interfaces;
+using Models.Lightning;
 
 /// <summary>
 /// Core Lightning (CLN) backend. Talks to the cln-grpc plugin over mutual TLS.
@@ -43,7 +45,7 @@ public class ClnService : ILightningService
         _rpcClient = new Node.NodeClient(channel);
     }
 
-    public async Task<string> FetchInvoiceAsync(long valueMillisats, string username, string? comment)
+    public async Task<CreatedInvoice> FetchInvoiceAsync(long valueMillisats, string username, string? comment)
     {
         try
         {
@@ -58,11 +60,38 @@ public class ClnService : ILightningService
             };
 
             var response = await _rpcClient.InvoiceAsync(request);
-            return response.Bolt11;
+            return new CreatedInvoice(response.Bolt11, Convert.ToHexStringLower(response.PaymentHash.Span));
         }
         catch (Exception e)
         {
             const string errorMessage = "Error fetching invoice from server";
+            _logger.LogError(e, errorMessage);
+            throw new Exception(errorMessage);
+        }
+    }
+
+    public async Task<InvoiceStatus?> LookupInvoiceAsync(string paymentHash)
+    {
+        try
+        {
+            var request = new ListinvoicesRequest { PaymentHash = ByteString.CopyFrom(Convert.FromHexString(paymentHash)) };
+            var response = await _rpcClient.ListInvoicesAsync(request);
+
+            var invoice = response.Invoices.FirstOrDefault();
+            if (invoice is null)
+            {
+                return null;
+            }
+
+            var settled = invoice.Status == ListinvoicesInvoices.Types.ListinvoicesInvoicesStatus.Paid;
+            var preimage = settled && invoice.HasPaymentPreimage
+                ? Convert.ToHexStringLower(invoice.PaymentPreimage.Span)
+                : null;
+            return new InvoiceStatus(invoice.Bolt11, settled, preimage);
+        }
+        catch (Exception e)
+        {
+            const string errorMessage = "Error looking up invoice on server";
             _logger.LogError(e, errorMessage);
             throw new Exception(errorMessage);
         }
