@@ -1,13 +1,12 @@
-FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+ARG TARGETARCH
 WORKDIR /src
 
 COPY ["LnAddress.Net.csproj", "LnAddress.Net.csproj"]
-RUN dotnet restore "LnAddress.Net.csproj" --no-cache
+RUN dotnet restore "LnAddress.Net.csproj" -a $TARGETARCH --no-cache
 
 COPY . .
-
-RUN dotnet build "LnAddress.Net.csproj" -c Release --no-restore
-RUN dotnet publish "LnAddress.Net.csproj" -c Release -o /app/publish --no-build
+RUN dotnet publish "LnAddress.Net.csproj" -c Release -a $TARGETARCH --self-contained false --no-restore -o /app/publish
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0-alpine
 WORKDIR /app
