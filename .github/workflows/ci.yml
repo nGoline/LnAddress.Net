@@ -1,0 +1,86 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  TEST_PROJECT: tests/LnAddress.Net.Tests/LnAddress.Net.Tests.csproj
+
+jobs:
+  build-and-test:
+    name: Build & unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore
+        run: dotnet restore LnAddress.Net.sln
+
+      - name: Build
+        run: dotnet build LnAddress.Net.sln -c Release --no-restore
+
+      - name: Unit tests
+        run: dotnet test --project "$TEST_PROJECT" -c Release --no-build --filter-not-namespace "*IntegrationTests*"
+
+      - name: Check for vulnerable packages
+        run: |
+          dotnet list LnAddress.Net.sln package --vulnerable --include-transitive | tee vulnerable.txt
+          if grep -q "has the following vulnerable packages" vulnerable.txt; then
+            echo "::error::Vulnerable NuGet packages found"
+            exit 1
+          fi
+
+  integration-tests:
+    name: Integration tests (${{ matrix.backend }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # xunit filters only take a wildcard at the start or end, so list each test class
+          - backend: LND
+            filter: --filter-class "*LndGrpcIntegrationTest"
+          - backend: CLN
+            filter: --filter-class "*ClnGrpcIntegrationTest" --filter-class "*ClnRestIntegrationTest"
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Integration tests
+        run: dotnet test --project "$TEST_PROJECT" ${{ matrix.filter }}
+
+  docker:
+    name: Docker image (multi-arch)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Build
+        uses: docker/build-push-action@v7
+        with:
+          context: src/LnAddress.Net
+          platforms: linux/amd64,linux/arm64,linux/arm/v7
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
