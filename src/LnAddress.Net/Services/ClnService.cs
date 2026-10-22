@@ -1,22 +1,20 @@
 using System.Security.Cryptography.X509Certificates;
-using System.Text;
 using Google.Protobuf;
 using Grpc.Net.Client;
 
 namespace LnAddress.Net.Services;
 
 using Cln;
+using Helpers;
 using Interfaces;
 using Models.Lightning;
 
 /// <summary>
-/// Core Lightning (CLN) backend. Talks to the cln-grpc plugin over mutual TLS.
+/// Core Lightning (CLN) backend over the cln-grpc plugin and mutual TLS. cln-grpc can't restrict what a client
+/// certificate may do, so prefer <see cref="ClnRestService"/> and a restricted rune.
 /// </summary>
 public class ClnService : ILightningService
 {
-    // Prefix of the labels LnAddress gives its invoices, used to tell them apart from other invoices on the node
-    private const string LabelPrefix = "lnaddress-";
-
     private readonly Node.NodeClient _rpcClient;
     private readonly ILogger<ClnService> _logger;
 
@@ -24,9 +22,9 @@ public class ClnService : ILightningService
     {
         _logger = logger;
 
-        var caCertPem = ReadPem(configuration, "Cln:CaCert", "Cln CA certificate config is missing");
-        var clientCertPem = ReadPem(configuration, "Cln:ClientCert", "Cln client certificate config is missing");
-        var clientKeyPem = ReadPem(configuration, "Cln:ClientKey", "Cln client key config is missing");
+        var caCertPem = CertificateHelpers.ReadPem(configuration, "Cln:CaCert", "Cln CA certificate config is missing");
+        var clientCertPem = CertificateHelpers.ReadPem(configuration, "Cln:ClientCert", "Cln client certificate config is missing");
+        var clientKeyPem = CertificateHelpers.ReadPem(configuration, "Cln:ClientKey", "Cln client key config is missing");
         var rpcAddress = configuration["Cln:RpcAddress"] ?? throw new Exception("Cln rpc address config is missing");
 
         var caCert = X509Certificate2.CreateFromPem(caCertPem);
@@ -35,9 +33,7 @@ public class ClnService : ILightningService
         var httpClientHandler = new HttpClientHandler
         {
             ClientCertificateOptions = ClientCertificateOption.Manual,
-            // The server certificate is issued by the node's own CA and carries "cln" as its
-            // subject name, so validate the chain against that CA instead of the system store.
-            ServerCertificateCustomValidationCallback = (_, cert, _, _) => IsIssuedByCa(cert, caCert)
+            ServerCertificateCustomValidationCallback = (_, cert, _, _) => CertificateHelpers.IsIssuedByCa(cert, caCert)
         };
         httpClientHandler.ClientCertificates.Add(clientCert);
 
@@ -54,16 +50,13 @@ public class ClnService : ILightningService
         {
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(valueMillisats);
 
-            // CLN requires a unique label per invoice. The label also keeps the comment, since the description
-            // must stay the metadata
-            var label = $"{LabelPrefix}{username}-{Guid.NewGuid():N}";
             var request = new InvoiceRequest
             {
                 AmountMsat = new AmountOrAny { Amount = new Amount { Msat = (ulong)valueMillisats } },
                 // With deschashonly, CLN puts sha256(description) in the invoice instead of the description
                 Description = metadata,
                 Deschashonly = true,
-                Label = comment is null ? label : $"{label}: {comment}"
+                Label = ClnInvoiceLabel.Create(username, comment)
             };
 
             var response = await _rpcClient.InvoiceAsync(request);
@@ -86,7 +79,7 @@ public class ClnService : ILightningService
 
             // Only answer for invoices LnAddress created, so verify doesn't expose other invoices on the node
             var invoice = response.Invoices.FirstOrDefault();
-            if (invoice is null || !invoice.Label.StartsWith(LabelPrefix, StringComparison.Ordinal))
+            if (invoice is null || !ClnInvoiceLabel.IsLnAddress(invoice.Label))
             {
                 return null;
             }
@@ -120,49 +113,11 @@ public class ClnService : ILightningService
         }
     }
 
-    /// <summary>
-    /// Reads a PEM value from configuration. The value may be the raw PEM text or the PEM file
-    /// encoded as a single-line base64 string (the latter is friendlier for environment variables).
-    /// </summary>
-    private static string ReadPem(IConfiguration configuration, string key, string missingMessage)
-    {
-        var value = configuration[key] ?? throw new Exception(missingMessage);
-        value = value.Trim();
-
-        if (value.StartsWith("-----BEGIN", StringComparison.Ordinal))
-        {
-            return value;
-        }
-
-        try
-        {
-            return Encoding.UTF8.GetString(Convert.FromBase64String(value));
-        }
-        catch (FormatException)
-        {
-            throw new Exception($"{key} must be PEM text or a base64 encoded PEM file");
-        }
-    }
-
     private static X509Certificate2 LoadClientCertificate(string certPem, string keyPem)
     {
         using var ephemeral = X509Certificate2.CreateFromPem(certPem, keyPem);
         // Certificates created from PEM hold an ephemeral private key, which the TLS stack on
         // Windows and macOS cannot use. Round-tripping through PKCS#12 makes the key persistable.
         return X509CertificateLoader.LoadPkcs12(ephemeral.Export(X509ContentType.Pkcs12), null);
-    }
-
-    private static bool IsIssuedByCa(X509Certificate2? serverCert, X509Certificate2 caCert)
-    {
-        if (serverCert is null)
-        {
-            return false;
-        }
-
-        using var chain = new X509Chain();
-        chain.ChainPolicy.TrustMode = X509ChainTrustMode.CustomRootTrust;
-        chain.ChainPolicy.CustomTrustStore.Add(caCert);
-        chain.ChainPolicy.RevocationMode = X509RevocationMode.NoCheck;
-        return chain.Build(serverCert);
     }
 }
