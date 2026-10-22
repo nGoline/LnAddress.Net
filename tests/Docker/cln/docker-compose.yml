@@ -24,7 +24,7 @@ services:
       retries: 30
 
   cln:
-    image: elementsproject/lightningd:v26.06.8
+    image: elementsproject/lightningd:v26.06.9
     container_name: lnaddress-cln-node
     depends_on:
       bitcoind:
@@ -46,7 +46,7 @@ services:
       - "127.0.0.1:19736:9736"
 
   cln-payer:
-    image: elementsproject/lightningd:v26.06.8
+    image: elementsproject/lightningd:v26.06.9
     container_name: lnaddress-cln-payer
     depends_on:
       bitcoind:

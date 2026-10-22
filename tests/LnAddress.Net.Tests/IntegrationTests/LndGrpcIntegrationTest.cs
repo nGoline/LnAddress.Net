@@ -12,11 +12,15 @@ using Invoice = NLightning.Bolt11.Models.Invoice;
 namespace LnAddress.Net.Tests.IntegrationTests;
 
 using Fixtures;
+using LnAddress.Net.Helpers;
 using LnAddress.Net.Services;
 
 [Collection("regtest")]
 public class LndGrpcIntegrationTest
 {
+    private const string Username = "ngoline";
+    private static readonly string Metadata = LnUrlMetadata.Build(Username, "ln.example.com");
+
     private readonly LightningRegtestFixture _lightningRegtestFixture;
     private readonly LNDNodeConnection _alice;
     private readonly LndService _lndService;
@@ -42,49 +46,35 @@ public class LndGrpcIntegrationTest
         _lndService = new LndService(configuration, loggerMock.Object);
     }
 
-    [Fact]
-    public async Task Given_ValidAmount_When_FetchInvoice_Then_Expect_ValidInvoice()
+    [Theory]
+    [InlineData(null)]
+    [InlineData("thanks for the coffee")]
+    public async Task Given_ValidAmount_When_FetchInvoice_Then_Expect_DescriptionHashOfMetadata(string? comment)
     {
         // Arrange
         const long expectedAmount = 10_000L;
-        const string expectedDescription = "payment for nGoline";
         var expectedPubkey = _alice.LocalNodePubKeyBytes;
 
         // Act
-        var invoice = (await _lndService.FetchInvoiceAsync(expectedAmount, "nGoline", null)).PaymentRequest;
+        var invoice = (await _lndService.FetchInvoiceAsync(expectedAmount, Username, Metadata, comment)).PaymentRequest;
 
         // Assert
         var decodedInvoice = Invoice.Decode(invoice, BitcoinNetwork.Regtest);
         Assert.NotNull(decodedInvoice);
         Assert.Equal(expectedPubkey, decodedInvoice.PayeePubKey?.ToBytes());
         Assert.Equal(expectedAmount, (long)decodedInvoice.Amount.MilliSatoshi);
-        Assert.Equal(expectedDescription, decodedInvoice.Description);
-    }
-
-    [Fact]
-    public async Task Given_ValidAmountAndDescription_When_FetchInvoice_Then_Expect_ValidInvoice()
-    {
-        // Arrange
-        const long expectedAmount = 10_000L;
-        const string expectedDescription = "LnAddress Payment";
-        var expectedPubkey = _alice.LocalNodePubKeyBytes;
-
-        // Act
-        var invoice = (await _lndService.FetchInvoiceAsync(expectedAmount, "nGoline", expectedDescription)).PaymentRequest;
-
-        // Assert
-        var decodedInvoice = Invoice.Decode(invoice, BitcoinNetwork.Regtest);
-        Assert.NotNull(decodedInvoice);
-        Assert.Equal(expectedPubkey, decodedInvoice.PayeePubKey?.ToBytes());
-        Assert.Equal(expectedAmount, (long)decodedInvoice.Amount.MilliSatoshi);
-        Assert.Equal(expectedDescription, decodedInvoice.Description);
+        Assert.True(string.IsNullOrEmpty(decodedInvoice.Description));
+        // LUD-06: wallets check the h tag against sha256(metadata). A comment must not change it
+        var payReq = await _alice.LightningClient.DecodePayReqAsync(new PayReqString { PayReq = invoice },
+            cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Equal(Convert.ToHexStringLower(LnUrlMetadata.Hash(Metadata)), payReq.DescriptionHash);
     }
 
     [Fact]
     public async Task Given_ValidInvoice_When_Paying_Then_NoError()
     {
         // Arrange
-        var invoice = (await _lndService.FetchInvoiceAsync(10_000, "nGoline", null)).PaymentRequest;
+        var invoice = (await _lndService.FetchInvoiceAsync(10_000, Username, Metadata, null)).PaymentRequest;
         var carol = _lightningRegtestFixture.Builder?.LNDNodePool?.ReadyNodes.First(x => x.LocalAlias == "carol") ?? throw new Exception("Bob was not ready.");
         // Wait for a second so channels are synced
         await Task.Delay(1_000, TestContext.Current.CancellationToken);
@@ -109,7 +99,7 @@ public class LndGrpcIntegrationTest
     public async Task Given_UnpaidInvoice_When_LookupInvoice_Then_Expect_NotSettled()
     {
         // Arrange
-        var invoice = await _lndService.FetchInvoiceAsync(10_000, "nGoline", null);
+        var invoice = await _lndService.FetchInvoiceAsync(10_000, Username, Metadata, null);
 
         // Act
         var status = await _lndService.LookupInvoiceAsync(invoice.PaymentHash);
@@ -125,7 +115,7 @@ public class LndGrpcIntegrationTest
     public async Task Given_PaidInvoice_When_LookupInvoice_Then_Expect_SettledWithPreimage()
     {
         // Arrange
-        var invoice = await _lndService.FetchInvoiceAsync(10_000, "nGoline", null);
+        var invoice = await _lndService.FetchInvoiceAsync(10_000, Username, Metadata, null);
         var carol = _lightningRegtestFixture.Builder?.LNDNodePool?.ReadyNodes.First(x => x.LocalAlias == "carol") ?? throw new Exception("Carol was not ready.");
         // Wait for a second so channels are synced
         await Task.Delay(1_000, TestContext.Current.CancellationToken);

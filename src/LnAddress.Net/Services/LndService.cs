@@ -6,6 +6,7 @@ using Grpc.Net.Client;
 namespace LnAddress.Net.Services;
 
 using Lnrpc;
+using Helpers;
 using Interfaces;
 using Models.Lightning;
 
@@ -48,13 +49,14 @@ public class LndService : ILightningService
         _rpcClient = new Lightning.LightningClient(channel);
     }
 
-    public async Task<CreatedInvoice> FetchInvoiceAsync(long valueMillisats, string username, string? comment)
+    public async Task<CreatedInvoice> FetchInvoiceAsync(long valueMillisats, string username, string metadata, string? comment)
     {
         try
         {
+            // LND invoices have nowhere to keep the comment, so it is dropped
             var invoice = new Invoice
             {
-                Memo = comment ?? $"payment for {username}",
+                DescriptionHash = ByteString.CopyFrom(LnUrlMetadata.Hash(metadata)),
                 ValueMsat = valueMillisats
             };
 

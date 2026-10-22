@@ -149,10 +149,14 @@ docker run -d \
 
 ## Supported LNURL Specs
 
-- [LUD-06](https://github.com/lnurl/luds/blob/luds/06.md): `payRequest` base spec.
+- [LUD-06](https://github.com/lnurl/luds/blob/luds/06.md): `payRequest` base spec. Invoices commit to the metadata
+  through their description hash, so wallets that check it accept them.
 - [LUD-12](https://github.com/lnurl/luds/blob/luds/12.md): comments in `payRequest`, enabled by
-  `INVOICE__MAXCOMMENTALLOWED`.
-- [LUD-16](https://github.com/lnurl/luds/blob/luds/16.md): Lightning Address, `username@your.domain`.
+  `INVOICE__MAXCOMMENTALLOWED`. The comment can't go in the invoice without breaking the description hash. On Core
+  Lightning it is kept in the invoice label (`lnaddress-<username>-<id>: <comment>`); LND has no such field, so it is
+  dropped.
+- [LUD-16](https://github.com/lnurl/luds/blob/luds/16.md): Lightning Address, `username@your.domain`. Usernames may use
+  `a-z`, `0-9`, `-`, `_` and `.` (case-insensitive, served lowercase); anything else returns `404`.
 - [LUD-21](https://github.com/lnurl/luds/blob/luds/21.md): `verify` base spec. The callback response carries a
   `verify` URL (`https://your.domain/lnurl/verify/<payment_hash>`) that anyone holding the invoice can poll to learn
   whether it was settled. Once paid, the response includes the preimage:
@@ -162,12 +166,13 @@ docker run -d \
   ```
 
   Unknown payment hashes return `{"status": "ERROR", "reason": "Not found"}`. The endpoint needs no authentication.
-  It looks up the hash on the backend node, so it answers for **any** invoice on that node, not only the ones
-  LnAddress created. For invoices LnAddress issued, it only reveals data the payer already holds.
+  For invoices LnAddress issued, it only reveals data the payer already holds. On Core Lightning it only answers for
+  invoices LnAddress created (their label starts with `lnaddress-`). On LND it can't tell them apart, so it answers
+  for **any** invoice on the node.
 
-  > **Use a dedicated node.** If other apps (a shop, a wallet, ...) create invoices on the same node, anyone who
-  > learns one of their payment hashes can read the full bolt11 (amount and description), and once it is paid, the
-  > preimage, which serves as proof of payment. Run LnAddress against a node used only for it, or don't expose
+  > **LND: use a dedicated node.** If other apps (a shop, a wallet, ...) create invoices on the same LND node, anyone
+  > who learns one of their payment hashes can read the full bolt11 (amount and description), and once it is paid,
+  > the preimage, which serves as proof of payment. Run LnAddress against a node used only for it, or don't expose
   > `/lnurl/verify` publicly.
 
 ## Default Settings

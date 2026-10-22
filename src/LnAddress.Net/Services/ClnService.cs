@@ -14,6 +14,9 @@ using Models.Lightning;
 /// </summary>
 public class ClnService : ILightningService
 {
+    // Prefix of the labels LnAddress gives its invoices, used to tell them apart from other invoices on the node
+    private const string LabelPrefix = "lnaddress-";
+
     private readonly Node.NodeClient _rpcClient;
     private readonly ILogger<ClnService> _logger;
 
@@ -45,18 +48,22 @@ public class ClnService : ILightningService
         _rpcClient = new Node.NodeClient(channel);
     }
 
-    public async Task<CreatedInvoice> FetchInvoiceAsync(long valueMillisats, string username, string? comment)
+    public async Task<CreatedInvoice> FetchInvoiceAsync(long valueMillisats, string username, string metadata, string? comment)
     {
         try
         {
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(valueMillisats);
 
+            // CLN requires a unique label per invoice. The label also keeps the comment, since the description
+            // must stay the metadata
+            var label = $"{LabelPrefix}{username}-{Guid.NewGuid():N}";
             var request = new InvoiceRequest
             {
                 AmountMsat = new AmountOrAny { Amount = new Amount { Msat = (ulong)valueMillisats } },
-                Description = comment ?? $"payment for {username}",
-                // CLN requires a unique label per invoice
-                Label = $"lnaddress-{username}-{Guid.NewGuid():N}"
+                // With deschashonly, CLN puts sha256(description) in the invoice instead of the description
+                Description = metadata,
+                Deschashonly = true,
+                Label = comment is null ? label : $"{label}: {comment}"
             };
 
             var response = await _rpcClient.InvoiceAsync(request);
@@ -77,8 +84,9 @@ public class ClnService : ILightningService
             var request = new ListinvoicesRequest { PaymentHash = ByteString.CopyFrom(Convert.FromHexString(paymentHash)) };
             var response = await _rpcClient.ListInvoicesAsync(request);
 
+            // Only answer for invoices LnAddress created, so verify doesn't expose other invoices on the node
             var invoice = response.Invoices.FirstOrDefault();
-            if (invoice is null)
+            if (invoice is null || !invoice.Label.StartsWith(LabelPrefix, StringComparison.Ordinal))
             {
                 return null;
             }
