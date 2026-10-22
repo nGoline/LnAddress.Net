@@ -2,11 +2,10 @@ services:
   lnaddress.net:
     image: ngoline/lnaddress.net:latest
     ports:
-      - "65535:80"
+      - "65535:8080"
     networks:
       - app-network
     environment:
-      - ASPNETCORE_URLS=http://+:80
       - ASPNETCORE_ENVIRONMENT=Production
       # Lightning backend: lnd (default) or cln
       - LIGHTNING__BACKEND=lnd
@@ -22,12 +21,8 @@ services:
       - INVOICE__MINSENDABLE=10000
       - INVOICE__MAXSENDABLE=100000000
       - INVOICE__MAXCOMMENTALLOWED=255
+    # The image ships a healthcheck against /health on port 8080
     restart: unless-stopped
-    healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:80/health" ]
-      interval: 30s
-      timeout: 10s
-      retries: 3
 
 networks:
   app-network:
