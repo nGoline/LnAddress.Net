@@ -67,6 +67,34 @@ public class ClnRegtestFixture : IDisposable
         return ExtractJsonString(output, "payment_preimage");
     }
 
+    /// <summary>
+    /// Creates an invoice directly on the node under test, as another app sharing the node would, and returns its
+    /// payment hash.
+    /// </summary>
+    public async Task<string> CreateForeignInvoiceAsync()
+    {
+        var output = await Run("docker", $"exec {ClnContainer} {LightningCli} invoice 10000msat other-app-{Guid.NewGuid():N} other");
+        return ExtractJsonString(output, "payment_hash");
+    }
+
+    /// <summary>
+    /// Decodes a BOLT11 invoice on the node under test and returns its description hash as hex.
+    /// </summary>
+    public async Task<string> DecodeDescriptionHashAsync(string bolt11)
+    {
+        var output = await Run("docker", $"exec {ClnContainer} {LightningCli} decode {bolt11}");
+        return ExtractJsonString(output, "description_hash");
+    }
+
+    /// <summary>
+    /// Returns the label of the invoice with the given payment hash on the node under test.
+    /// </summary>
+    public async Task<string> GetInvoiceLabelAsync(string paymentHash)
+    {
+        var output = await Run("docker", $"exec {ClnContainer} {LightningCli} listinvoices -k payment_hash={paymentHash}");
+        return ExtractJsonString(output, "label");
+    }
+
     private async Task OpenChannelFromPayer(string minerAddress)
     {
         // Fund the payer's on-chain wallet

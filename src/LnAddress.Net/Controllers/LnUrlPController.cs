@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace LnAddress.Net.Controllers;
 
+using Helpers;
 using Models.Responses;
 
 [ApiController]
@@ -13,6 +14,11 @@ public class LnUrlPController(IConfiguration configuration) : ControllerBase
     {
         try
         {
+            if (!LnUrlMetadata.TryNormalizeUsername(username, out var normalizedUsername))
+            {
+                return NotFound(new ErrorResponse("Not found"));
+            }
+
             // Get the host called
             var domain = Request.Host.Value;
 
@@ -32,8 +38,8 @@ public class LnUrlPController(IConfiguration configuration) : ControllerBase
                 commentAllowed = commentAllowedFromConfig;
             }
             
-            return new LnAddressWellKnownResponse($"https://{domain}/lnurl/callback/{username}", minSendable, maxSendable)
-                .WithMetadata($"""[["text/plain","Paying {username}"]]""")
+            return new LnAddressWellKnownResponse($"https://{domain}/lnurl/callback/{normalizedUsername}", minSendable, maxSendable)
+                .WithMetadata(LnUrlMetadata.Build(normalizedUsername, Request.Host.Host))
                 .WithCommentAllowed(commentAllowed);
         }
         catch (Exception e)
