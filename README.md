@@ -5,8 +5,10 @@ example: `username@your.domain`.
 
 ## Overview
 
-- **Docker Image**: A pre-built Docker image is available
+- **Docker Image**: A pre-built multi-arch image (`amd64`, `arm64`, `arm/v7`) is available
   at [ngoline/lnaddress.net](https://hub.docker.com/r/ngoline/lnaddress.net).
+- **Binaries**: Self-contained builds for Linux, macOS and Windows are attached to each
+  [GitHub release](https://github.com/nGoline/LnAddress.Net/releases); no .NET runtime required.
 - **Configuration Reference**: Review the [docker-compose.yml](docker-compose.yml) file for a complete list of
   environment variables and configuration options.
 - **Reverse Proxy Setup**: An example Nginx configuration is provided in [example.nginx](example.nginx).
@@ -29,7 +31,9 @@ example: `username@your.domain`.
 
 3. **Set Up Nginx (Optional)**:
 
-   For a production setup, use [example.nginx](example.nginx) as a guide to set up a reverse proxy with TLS termination.
+   For a production setup, use [example.nginx](example.nginx) as a guide to set up a reverse proxy. LNURL requires
+   HTTPS, and LnAddress.Net builds its callback and verify URLs as `https://<Host header>/...`, so the proxy must
+   terminate TLS (for example with `certbot --nginx`) and forward the original `Host` header.
 
 ## Connecting to LND
 
@@ -44,13 +48,13 @@ LnAddress.Net to your LND instance. You will need:
 
 1. **TLS Certificate**:
 
-   Extract the certificate content between the `-----BEGIN CERTIFICATE-----` and `-----END CERTIFICATE-----` lines.
+   Take the base64 body of `tls.cert`, without the `-----BEGIN/END CERTIFICATE-----` lines, as a single line:
 
    ```bash
-   cat /.lnd/tls.cert
+   grep -v CERTIFICATE ~/.lnd/tls.cert | tr -d '\n'
    ```
 
-   Copy only the certificate portion without the header and footer lines.
+   Unlike the CLN settings, `LND__CERT` does not accept raw PEM text.
 
 2. **Macaroon**:
 
@@ -138,7 +142,7 @@ clients with mutual TLS. You will need:
 
 ```bash
 docker run -d \
-  -p 80:80 \
+  -p 8080:8080 \
   -e LIGHTNING__BACKEND=cln \
   -e CLN__RPCADDRESS="https://<cln-ip>:9736" \
   -e CLN__CACERT="<base64_ca_pem>" \
@@ -170,6 +174,15 @@ docker run -d \
   > preimage, which serves as proof of payment. Run LnAddress against a node used only for it, or don't expose
   > `/lnurl/verify` publicly.
 
+## Endpoints
+
+| Endpoint                                | Description                                                            |
+|-----------------------------------------|------------------------------------------------------------------------|
+| `GET /.well-known/lnurlp/{username}`    | LUD-16 Lightning Address lookup. Any username is accepted.             |
+| `GET /lnurl/callback/{username}`        | Creates an invoice. Query: `amount` (millisatoshis), optional `comment`. |
+| `GET /lnurl/verify/{payment_hash}`      | LUD-21 verify, see above.                                              |
+| `GET /health`                           | `200` when the Lightning node answers `getinfo`, `503`/`500` otherwise.  |
+
 ## Default Settings
 
 - **MinSendable**: 1,000 millisatoshis (1 satoshi)
@@ -184,14 +197,14 @@ in [docker-compose.yml](docker-compose.yml).
 Once you have your environment variables set and Docker is ready, you can run:
 
 ```bash
-docker-compose up -d
+docker compose up -d
 ```
 
-or, if running standalone:
+or, if running standalone (the container listens on port `8080`):
 
 ```bash
 docker run -d \
-  -p 80:80 \
+  -p 8080:8080 \
   -e LND__CERT="<base64_tls_cert>" \
   -e LND__MACAROON="<base64_macaroon>" \
   -e LND__RPCADDRESS="https://<lnd-ip>:10009" \
@@ -199,6 +212,34 @@ docker run -d \
 ```
 
 Replace the environment variables with your actual values.
+
+### Running the binaries
+
+Download the archive for your platform from the [releases page](https://github.com/nGoline/LnAddress.Net/releases),
+check it against `SHA256SUMS`, then set the same environment variables and run it:
+
+```bash
+tar xzf lnaddress.net-<version>-linux-x64.tar.gz
+ASPNETCORE_URLS=http://127.0.0.1:8080 \
+LND__CERT="<base64_tls_cert>" \
+LND__MACAROON="<base64_macaroon>" \
+LND__RPCADDRESS="https://<lnd-ip>:10009" \
+./LnAddress.Net
+```
+
+Without `ASPNETCORE_URLS`, the binary listens on `http://localhost:5000`.
+
+## Development
+
+Requires the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0).
+
+```bash
+dotnet build
+# Unit tests
+dotnet test --project tests/LnAddress.Net.Tests --filter-not-namespace "*IntegrationTests*"
+# Integration tests: spin up regtest bitcoind + LND / Core Lightning nodes, Docker required
+dotnet test --project tests/LnAddress.Net.Tests --filter-namespace "*IntegrationTests*"
+```
 
 ---
 

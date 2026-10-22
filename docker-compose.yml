@@ -2,11 +2,10 @@ services:
   lnaddress.net:
     image: ngoline/lnaddress.net:latest
     ports:
-      - "65535:80"
+      - "65535:8080"
     networks:
       - app-network
     environment:
-      - ASPNETCORE_URLS=http://+:80
       - ASPNETCORE_ENVIRONMENT=Production
       # Lightning backend: lnd (default) or cln
       - LIGHTNING__BACKEND=lnd
@@ -24,7 +23,7 @@ services:
       - INVOICE__MAXCOMMENTALLOWED=255
     restart: unless-stopped
     healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:80/health" ]
+      test: [ "CMD", "wget", "-qO", "/dev/null", "http://localhost:8080/health" ]
       interval: 30s
       timeout: 10s
       retries: 3
