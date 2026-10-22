@@ -25,8 +25,9 @@ example: `username@your.domain`.
 
    Check the [docker-compose.yml](docker-compose.yml) file for environment variables. These variables allow you to:
 
-    - Choose the Lightning backend (`LIGHTNING__BACKEND`): `lnd` (default) or `cln` (Core Lightning).
-    - Configure connection details to your LND or Core Lightning instance.
+    - Choose the Lightning backend (`LIGHTNING__BACKEND`): `lnd` (default), `clnrest` (Core Lightning, recommended)
+      or `cln` (Core Lightning over gRPC, legacy).
+    - Configure connection details to your LND or Core Lightning node.
     - Adjust limits for payment amounts or comment fields.
 
 3. **Set Up Nginx (Optional)**:
@@ -93,7 +94,85 @@ LnAddress.Net to your LND instance. You will need:
 
 ## Connecting to Core Lightning (CLN)
 
-Set `LIGHTNING__BACKEND=cln` to use Core Lightning instead of LND. LnAddress.Net talks to the
+LnAddress.Net can reach Core Lightning in two ways:
+
+- **clnrest with a rune (recommended)**: `LIGHTNING__BACKEND=clnrest`. The rune can be restricted to exactly what
+  LnAddress.Net needs, so a leaked rune can't move funds.
+- **cln-grpc with mutual TLS**: `LIGHTNING__BACKEND=cln`. cln-grpc can't restrict a client: its certificate grants full
+  control of the node. Kept for existing setups; see [Legacy: cln-grpc](#legacy-cln-grpc).
+
+### clnrest with a restricted rune
+
+You will need:
+
+- The **clnrest endpoint**
+- A **rune** restricted to the calls LnAddress.Net makes
+- The node's **CA certificate** (`ca.pem`) to validate clnrest's TLS certificate
+
+1. **Enable clnrest**:
+
+   Add the following to your CLN config (or pass them as command line flags) and restart `lightningd`:
+
+   ```ini
+   clnrest-port=3010
+   clnrest-host=0.0.0.0
+   ```
+
+   Leave `clnrest-host` unset if LnAddress.Net runs on the same host as CLN (clnrest listens on `127.0.0.1` by
+   default); otherwise it must be an IP address. clnrest serves HTTPS with a certificate issued by the node's CA:
+   `ca.pem` in the network directory (for example `~/.lightning/bitcoin/`), the same CA cln-grpc uses.
+
+2. **Create the rune**:
+
+   ```bash
+   lightning-cli createrune restrictions='[["method=getinfo","method=invoice","method=listinvoices"],["method/invoice","pnamelabel^lnaddress-"],["method/listinvoices","pnamepayment_hash/"]]'
+   ```
+
+   Each inner list is a set of alternatives, and all of them must hold. The rune can only:
+
+   - call `getinfo`, `invoice` and `listinvoices`;
+   - create invoices whose label starts with `lnaddress-`, the prefix LnAddress.Net uses;
+   - look up invoices by `payment_hash`, one at a time, so it can't list your other invoices.
+
+   Everything else, such as `pay`, `withdraw`, `listfunds` or `createrune`, is rejected. Copy the `rune` value from
+   the output. To revoke it later, find its `unique_id` with `lightning-cli showrunes` and run
+   `lightning-cli blacklistrune <unique_id>`.
+
+3. **CA certificate**:
+
+   ```bash
+   base64 ~/.lightning/bitcoin/ca.pem | tr -d '\n'
+   ```
+
+   Raw PEM text is accepted as well. The server certificate is validated against this CA, so the hostname doesn't
+   need to match the certificate. Leave `CLNREST__CACERT` unset only if clnrest sits behind a proxy with a publicly
+   trusted certificate.
+
+**Environment variables**:
+
+```bash
+docker run -d \
+  -p 8080:8080 \
+  -e LIGHTNING__BACKEND=clnrest \
+  -e CLNREST__URL="https://<cln-ip>:3010" \
+  -e CLNREST__RUNE="<rune>" \
+  -e CLNREST__CACERT="<base64_ca_pem>" \
+  ngoline/lnaddress.net:latest
+```
+
+> [!WARNING]
+> **Don't expose clnrest or cln-grpc to the public internet.** The rune above can't spend funds, but anyone holding
+> it can still create invoices on your node, and the clnrest port accepts any other rune you have issued, including
+> unrestricted ones.
+>
+> - Run LnAddress.Net next to `lightningd` on a private Docker network and don't publish the clnrest or gRPC port at
+>   all (`CLNREST__URL=https://lightningd:3010`).
+> - Only proxy `/.well-known/lnurlp/` and `/lnurl/` to LnAddress.Net, as [example.nginx](example.nginx) does.
+> - Treat the rune like a password.
+
+### Legacy: cln-grpc
+
+`LIGHTNING__BACKEND=cln` talks to the
 [cln-grpc](https://github.com/ElementsProject/lightning/tree/master/plugins/grpc-plugin) plugin, which authenticates
 clients with mutual TLS. You will need:
 
@@ -101,7 +180,12 @@ clients with mutual TLS. You will need:
 - A **client certificate and key** signed by that CA (`client.pem` and `client-key.pem`)
 - The **cln-grpc endpoint**
 
-**Steps to Obtain CLN Credentials**:
+> [!CAUTION]
+> **The cln-grpc client certificate grants full control of the node, funds included.** cln-grpc accepts any
+> certificate signed by the node's CA and can't restrict it to certain methods, unlike LND macaroons or clnrest
+> runes. LnAddress.Net only calls `invoice`, `listinvoices` and `getinfo`, but anyone holding `client.pem` and
+> `client-key.pem` can do anything, including spending funds. Prefer [clnrest](#clnrest-with-a-restricted-rune); if you
+> stay on cln-grpc, follow the warning above and treat the `CLN__*` environment variables like a hot wallet's keys.
 
 1. **Enable the gRPC plugin**:
 
@@ -130,24 +214,8 @@ clients with mutual TLS. You will need:
 
 3. **RPC Server URL**:
 
-   Set your cln-grpc endpoint, for example:
-
-   ```bash
-   https://<cln-ip>:9736
-   ```
-
-   The server certificate is validated against `ca.pem`, so the hostname does not need to match the certificate.
-
-> [!WARNING]
-> **The cln-grpc client certificate grants full control of the node, funds included.** Unlike LND macaroons, cln-grpc
-> certificates can't be restricted to certain methods. LnAddress.Net only calls `invoice`, `listinvoices` and
-> `getinfo`, but anyone holding `client.pem` and `client-key.pem` can do anything, including spending funds. To limit
-> the exposure:
->
-> - Keep the gRPC port off the public network. Ideally run LnAddress.Net next to `lightningd` on a private Docker
->   network and don't publish `9736` at all (`CLN__RPCADDRESS=https://lightningd:9736`).
-> - Only proxy `/.well-known/lnurlp/` and `/lnurl/` to LnAddress.Net, as [example.nginx](example.nginx) does.
-> - Treat the `CLN__*` environment variables like a hot wallet's keys.
+   Set your cln-grpc endpoint, for example `https://<cln-ip>:9736`. The server certificate is validated against
+   `ca.pem`, so the hostname does not need to match the certificate.
 
 **Environment variables**:
 
@@ -161,6 +229,12 @@ docker run -d \
   -e CLN__CLIENTKEY="<base64_client_key_pem>" \
   ngoline/lnaddress.net:latest
 ```
+
+**Moving from cln-grpc to clnrest**: enable clnrest and create the rune as above, then replace
+`LIGHTNING__BACKEND=cln` and the `CLN__*` variables with `LIGHTNING__BACKEND=clnrest` and the `CLNREST__*` ones.
+`CLNREST__CACERT` takes the same `ca.pem` as `CLN__CACERT`. Invoices created over either transport carry the same
+labels, so `/lnurl/verify` keeps working for invoices issued before the switch. Once nothing else uses cln-grpc,
+disable it and delete `client.pem` and `client-key.pem`.
 
 ## Supported LNURL Specs
 
