@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace LnAddress.Net.Controllers;
 
+using Helpers;
 using Interfaces;
 using Models.Responses;
 
@@ -15,6 +16,11 @@ public partial class LnUrlController(ILightningService lightningService, IConfig
     {
         try
         {
+            if (!LnUrlMetadata.TryNormalizeUsername(username, out var normalizedUsername))
+            {
+                return NotFound(new ErrorResponse("Not found"));
+            }
+
             if (!long.TryParse(configuration["Invoice:MinSendable"], out var minSendable))
             {
                 minSendable = 1_000;
@@ -45,7 +51,9 @@ public partial class LnUrlController(ILightningService lightningService, IConfig
                 comment = comment[..commentAllowed.Value];
             }
 
-            var invoice = await lightningService.FetchInvoiceAsync(amount, username, comment);
+            // Must match the metadata served by the well-known endpoint, or wallets reject the invoice
+            var metadata = LnUrlMetadata.Build(normalizedUsername, Request.Host.Host);
+            var invoice = await lightningService.FetchInvoiceAsync(amount, normalizedUsername, metadata, comment);
             var verify = $"https://{Request.Host.Value}/lnurl/verify/{invoice.PaymentHash}";
             return new LnUrlCallbackResponse(invoice.PaymentRequest, verify);
         }

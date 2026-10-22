@@ -2,19 +2,22 @@ services:
   lnaddress.net:
     image: ngoline/lnaddress.net:latest
     ports:
-      - "65535:80"
+      - "65535:8080"
     networks:
       - app-network
     environment:
-      - ASPNETCORE_URLS=http://+:80
       - ASPNETCORE_ENVIRONMENT=Production
-      # Lightning backend: lnd (default) or cln
+      # Lightning backend: lnd (default), clnrest (Core Lightning, recommended) or cln (Core Lightning over gRPC)
       - LIGHTNING__BACKEND=lnd
       # LND settings (when LIGHTNING__BACKEND=lnd)
       - LND__MACAROON=BASE64
       - LND__CERT=BASE64
       - LND__RPCADDRESS=https://your.lnd.address:10009
-      # Core Lightning settings (when LIGHTNING__BACKEND=cln)
+      # Core Lightning over clnrest (when LIGHTNING__BACKEND=clnrest). See the README for the rune to create
+      # - CLNREST__URL=https://your.cln.address:3010
+      # - CLNREST__RUNE=RUNE
+      # - CLNREST__CACERT=BASE64_OF_ca.pem
+      # Core Lightning over cln-grpc (when LIGHTNING__BACKEND=cln). The client certificate grants full node control
       # - CLN__RPCADDRESS=https://your.cln.address:9736
       # - CLN__CACERT=BASE64_OF_ca.pem
       # - CLN__CLIENTCERT=BASE64_OF_client.pem
@@ -22,12 +25,8 @@ services:
       - INVOICE__MINSENDABLE=10000
       - INVOICE__MAXSENDABLE=100000000
       - INVOICE__MAXCOMMENTALLOWED=255
+    # The image ships a healthcheck against /health on port 8080
     restart: unless-stopped
-    healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:80/health" ]
-      interval: 30s
-      timeout: 10s
-      retries: 3
 
 networks:
   app-network:

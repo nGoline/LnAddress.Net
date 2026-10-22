@@ -8,8 +8,9 @@
 **/.idea/
 **/.DS_Store/
 
-# Configuration files
+# Configuration files (appsettings.json only holds logging defaults)
 **/appsettings*.json
+!appsettings.json
 **/*.Development.json
 **/*.Production.json
 **/*.Staging.json
