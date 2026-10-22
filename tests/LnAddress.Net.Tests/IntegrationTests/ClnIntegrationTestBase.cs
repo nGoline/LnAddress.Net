@@ -1,7 +1,4 @@
 using System.Security.Cryptography;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.Logging;
-using Moq;
 using NLightning.Domain.Protocol.ValueObjects;
 using Invoice = NLightning.Bolt11.Models.Invoice;
 
@@ -9,39 +6,27 @@ namespace LnAddress.Net.Tests.IntegrationTests;
 
 using Fixtures;
 using LnAddress.Net.Helpers;
-using LnAddress.Net.Services;
+using LnAddress.Net.Interfaces;
 
-[Collection("cln-regtest")]
-public class ClnGrpcIntegrationTest
+/// <summary>
+/// Tests a Core Lightning backend against the regtest nodes. Each transport (cln-grpc, clnrest) runs the same tests.
+/// </summary>
+public abstract class ClnIntegrationTestBase
 {
     private const string Username = "ngoline";
     private static readonly string Metadata = LnUrlMetadata.Build(Username, "ln.example.com");
 
     private readonly ClnRegtestFixture _fixture;
-    private readonly ClnService _clnService;
+    private readonly ILightningService _clnService;
 
-    public ClnGrpcIntegrationTest(ClnRegtestFixture fixture)
+    protected ClnIntegrationTestBase(ClnRegtestFixture fixture)
     {
         _fixture = fixture;
-
-        var loggerMock = new Mock<ILogger<ClnService>>();
-
-        var inMemorySettings = new Dictionary<string, string?>
-        {
-            { "Cln:RpcAddress", fixture.RpcAddress },
-            // Base64 encoded PEM files, as documented for the environment variables
-            { "Cln:CaCert", Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(fixture.CaCertPem)) },
-            { "Cln:ClientCert", Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(fixture.ClientCertPem)) },
-            // Raw PEM text is accepted too
-            { "Cln:ClientKey", fixture.ClientKeyPem }
-        };
-
-        var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(inMemorySettings)
-            .Build();
-
-        _clnService = new ClnService(configuration, loggerMock.Object);
+        // ReSharper disable once VirtualMemberCallInConstructor
+        _clnService = CreateService(fixture);
     }
+
+    protected abstract ILightningService CreateService(ClnRegtestFixture fixture);
 
     [Fact]
     public async Task Given_SyncedNode_When_CheckConnection_Then_Expect_True()

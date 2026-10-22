@@ -1,4 +1,4 @@
-# Regtest bitcoind + Core Lightning node with the cln-grpc plugin enabled, plus a second
+# Regtest bitcoind + Core Lightning node with the cln-grpc and clnrest plugins enabled, plus a second
 # Core Lightning node that pays invoices over a direct channel.
 # Used by the ClnGrpcIntegrationTest fixture.
 services:
@@ -41,9 +41,12 @@ services:
       - --bind-addr=0.0.0.0:9735
       - --grpc-host=0.0.0.0
       - --grpc-port=9736
+      - --clnrest-host=0.0.0.0
+      - --clnrest-port=3010
       - --log-level=info
     ports:
       - "127.0.0.1:19736:9736"
+      - "127.0.0.1:13010:3010"
 
   cln-payer:
     image: elementsproject/lightningd:v26.06.9

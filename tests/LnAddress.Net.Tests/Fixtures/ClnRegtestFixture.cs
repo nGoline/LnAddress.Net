@@ -4,8 +4,8 @@ namespace LnAddress.Net.Tests.Fixtures;
 
 /// <summary>
 /// Starts a regtest bitcoind and two Core Lightning nodes using tests/Docker/cln/docker-compose.yml:
-/// the node under test (with cln-grpc enabled) and a payer node with a channel to it. Mines enough
-/// blocks for the nodes to sync and exposes the mTLS identity needed to talk to the gRPC plugin.
+/// the node under test (with cln-grpc and clnrest enabled) and a payer node with a channel to it. Mines enough
+/// blocks for the nodes to sync and exposes the mTLS identity for the gRPC plugin and a rune for clnrest.
 /// </summary>
 // ReSharper disable once ClassNeverInstantiated.Global
 public class ClnRegtestFixture : IDisposable
@@ -17,10 +17,19 @@ public class ClnRegtestFixture : IDisposable
     private const string LightningCli = "lightning-cli --regtest";
     private const int InitialBlocks = 101;
 
+    /// <summary>
+    /// The rune restrictions the README recommends: only getinfo, invoice with an lnaddress- label, and
+    /// listinvoices for a single payment_hash.
+    /// </summary>
+    public const string RecommendedRuneRestrictions =
+        """[["method=getinfo","method=invoice","method=listinvoices"],["method/invoice","pnamelabel^lnaddress-"],["method/listinvoices","pnamepayment_hash/"]]""";
+
     private static readonly string ComposeDirectory =
         Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../Docker/cln"));
 
     public string RpcAddress { get; } = "https://127.0.0.1:19736";
+    public string RestAddress { get; } = "https://127.0.0.1:13010";
+    public string Rune { get; private set; } = string.Empty;
     public string CaCertPem { get; private set; } = string.Empty;
     public string ClientCertPem { get; private set; } = string.Empty;
     public string ClientKeyPem { get; private set; } = string.Empty;
@@ -56,6 +65,10 @@ public class ClnRegtestFixture : IDisposable
         ClientKeyPem = await Run("docker", $"exec {ClnContainer} cat /root/.lightning/regtest/client-key.pem");
 
         await OpenChannelFromPayer(minerAddress);
+
+        Rune = ExtractJsonString(
+            await Run("docker", ["exec", ClnContainer, "lightning-cli", "--regtest", "createrune", $"restrictions={RecommendedRuneRestrictions}"]),
+            "rune");
     }
 
     /// <summary>
@@ -152,14 +165,22 @@ public class ClnRegtestFixture : IDisposable
         return json[start..end];
     }
 
-    private static async Task<string> Run(string fileName, string arguments, bool throwOnError = true)
+    private static Task<string> Run(string fileName, string arguments, bool throwOnError = true) =>
+        Run(new ProcessStartInfo(fileName, arguments), throwOnError);
+
+    /// <summary>
+    /// Runs a command with each argument passed as is, for arguments that contain quotes such as JSON.
+    /// </summary>
+    private static Task<string> Run(string fileName, IEnumerable<string> arguments) =>
+        Run(new ProcessStartInfo(fileName, arguments), throwOnError: true);
+
+    private static async Task<string> Run(ProcessStartInfo startInfo, bool throwOnError)
     {
-        var startInfo = new ProcessStartInfo(fileName, arguments)
-        {
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-        };
+        startInfo.RedirectStandardOutput = true;
+        startInfo.RedirectStandardError = true;
+        startInfo.UseShellExecute = false;
+        var fileName = startInfo.FileName;
+        var arguments = startInfo.Arguments.Length > 0 ? startInfo.Arguments : string.Join(' ', startInfo.ArgumentList);
 
         using var process = Process.Start(startInfo) ?? throw new Exception($"Could not start {fileName}");
         var stdout = process.StandardOutput.ReadToEndAsync();
