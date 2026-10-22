@@ -1,0 +1,21 @@
+version: 2
+updates:
+  - package-ecosystem: nuget
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      grpc-protobuf:
+        patterns: [ "Grpc.*", "Google.Protobuf" ]
+      test:
+        patterns: [ "xunit*", "Microsoft.NET.Test.Sdk", "Moq", "coverlet.*" ]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: docker
+    directories: [ /src/LnAddress.Net, /tests/Docker/custom_lnd ]
+    schedule:
+      interval: weekly
