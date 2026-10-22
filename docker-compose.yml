@@ -21,12 +21,8 @@ services:
       - INVOICE__MINSENDABLE=10000
       - INVOICE__MAXSENDABLE=100000000
       - INVOICE__MAXCOMMENTALLOWED=255
+    # The image ships a healthcheck against /health on port 8080
     restart: unless-stopped
-    healthcheck:
-      test: [ "CMD", "wget", "-qO", "/dev/null", "http://localhost:8080/health" ]
-      interval: 30s
-      timeout: 10s
-      retries: 3
 
 networks:
   app-network:

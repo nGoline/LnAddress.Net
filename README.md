@@ -138,6 +138,17 @@ clients with mutual TLS. You will need:
 
    The server certificate is validated against `ca.pem`, so the hostname does not need to match the certificate.
 
+> [!WARNING]
+> **The cln-grpc client certificate grants full control of the node, funds included.** Unlike LND macaroons, cln-grpc
+> certificates can't be restricted to certain methods. LnAddress.Net only calls `invoice`, `listinvoices` and
+> `getinfo`, but anyone holding `client.pem` and `client-key.pem` can do anything, including spending funds. To limit
+> the exposure:
+>
+> - Keep the gRPC port off the public network. Ideally run LnAddress.Net next to `lightningd` on a private Docker
+>   network and don't publish `9736` at all (`CLN__RPCADDRESS=https://lightningd:9736`).
+> - Only proxy `/.well-known/lnurlp/` and `/lnurl/` to LnAddress.Net, as [example.nginx](example.nginx) does.
+> - Treat the `CLN__*` environment variables like a hot wallet's keys.
+
 **Environment variables**:
 
 ```bash
@@ -182,6 +193,15 @@ docker run -d \
 | `GET /lnurl/callback/{username}`        | Creates an invoice. Query: `amount` (millisatoshis), optional `comment`. |
 | `GET /lnurl/verify/{payment_hash}`      | LUD-21 verify, see above.                                              |
 | `GET /health`                           | `200` when the Lightning node answers `getinfo`, `503`/`500` otherwise.  |
+
+## Docker Image
+
+- Runs as a non-root user and listens on port `8080`. To change the port, set `ASPNETCORE_HTTP_PORTS`, which the
+  healthcheck also uses, rather than `ASPNETCORE_URLS`.
+- Has a built-in healthcheck that polls `/health` every 30 seconds. The container turns unhealthy when the Lightning
+  node can't be reached or isn't synced.
+- Logs requests at `Warning` and above only, so the healthcheck doesn't flood the logs. Set
+  `Logging__LogLevel__Microsoft.AspNetCore=Information` to see every request.
 
 ## Default Settings
 
