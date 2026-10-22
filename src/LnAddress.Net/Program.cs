@@ -26,11 +26,14 @@ switch (lightningBackend.Trim().ToLowerInvariant())
     case "lnd":
         builder.Services.AddSingleton<ILightningService, LndService>();
         break;
+    case "clnrest":
+        builder.Services.AddSingleton<ILightningService, ClnRestService>();
+        break;
     case "cln":
         builder.Services.AddSingleton<ILightningService, ClnService>();
         break;
     default:
-        throw new Exception($"Unknown Lightning:Backend '{lightningBackend}'. Supported values: lnd, cln");
+        throw new Exception($"Unknown Lightning:Backend '{lightningBackend}'. Supported values: lnd, clnrest, cln");
 }
 
 builder.Services.AddCors(options =>
