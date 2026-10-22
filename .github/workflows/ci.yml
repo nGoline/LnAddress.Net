@@ -53,10 +53,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # xunit filters only take a wildcard at the start or end, so list each test class
           - backend: LND
-            class: "*LndGrpcIntegrationTest"
+            filter: --filter-class "*LndGrpcIntegrationTest"
           - backend: CLN
-            class: "*ClnGrpcIntegrationTest"
+            filter: --filter-class "*ClnGrpcIntegrationTest" --filter-class "*ClnRestIntegrationTest"
     steps:
       - uses: actions/checkout@v7
 
@@ -65,7 +66,7 @@ jobs:
           dotnet-version: 10.0.x
 
       - name: Integration tests
-        run: dotnet test --project "$TEST_PROJECT" --filter-class "${{ matrix.class }}"
+        run: dotnet test --project "$TEST_PROJECT" ${{ matrix.filter }}
 
   docker:
     name: Docker image (multi-arch)
